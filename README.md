@@ -55,14 +55,17 @@ add a line like this (replace the path if the checkout moves):
 17 * * * * /Users/amanda/Documents/ChatGPT/PinPal/plaza-tea-monitor/run-monitor.sh >> /Users/amanda/Documents/ChatGPT/PinPal/plaza-tea-monitor/monitor.log 2>&1
 ```
 
-The full-season configuration should run no more than hourly. The monitor
-checks only dates currently inside the rolling 60-day release window.
+The full-season configuration should use small rotating batches. The GitHub
+workflow demonstrates a seven-batch rotation; the monitor still checks only
+dates currently inside the rolling 60-day release window.
 
 ## GitHub Actions
 
 This directory is a self-contained repository. Its workflow at
-`.github/workflows/monitor.yml` runs hourly and can also be started
-manually. The cloud runner uses a normal Chromium window inside a virtual
+`.github/workflows/monitor.yml` runs every 30 minutes and can also be started
+manually. Each run checks one of seven rotating date batches, so the complete
+rolling window is covered about every 3.5 hours without sending a large burst
+of requests. The cloud runner uses a normal Chromium window inside a virtual
 display because that is the browser mode OpenTable accepted during the local
 live test.
 
@@ -70,6 +73,9 @@ The committed workflow is configured for four guests, any tea seating from
 11:00 AM through 4:00 PM, and the complete November 18, 2026 through January
 12, 2027 season. Each run automatically skips past dates and dates that are
 more than 60 days away, matching the restaurant's rolling release policy.
+Successful results are merged across batches. An open availability issue is
+closed only after every currently eligible date has a recent successful check;
+a partial or blocked batch never turns a previous alert into "unavailable."
 
 When slots appear, the workflow creates or updates one GitHub issue labeled
 `tea-availability`; when they disappear, it closes that issue. To also send a
