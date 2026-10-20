@@ -51,6 +51,16 @@ export function eligibleDates(dates, { today, releaseDays = 60 } = {}) {
   return dates.filter(date => date >= today && date <= cutoff);
 }
 
+export function selectShard(dates, { shardCount = 1, shardIndex = 0 } = {}) {
+  if (!Number.isInteger(shardCount) || shardCount < 1) {
+    throw new Error('shardCount must be a positive whole number.');
+  }
+  if (!Number.isInteger(shardIndex) || shardIndex < 0 || shardIndex >= shardCount) {
+    throw new Error('shardIndex must identify one of the configured shards.');
+  }
+  return dates.filter((_, index) => index % shardCount === shardIndex);
+}
+
 export function parsePartySize(value) {
   const partySize = Number(value);
   if (!Number.isInteger(partySize) || partySize < 1 || partySize > 6) {
@@ -105,18 +115,42 @@ export function fingerprintSlots(slots) {
     .join('\n');
 }
 
+export function mergeSlots(previousSlots, currentSlots, checkedDates, eligible) {
+  const eligibleSet = new Set(eligible);
+  const checkedSet = new Set(checkedDates);
+  const retained = (Array.isArray(previousSlots) ? previousSlots : [])
+    .filter(slot => eligibleSet.has(slot.date) && !checkedSet.has(slot.date));
+  return [...new Map([...retained, ...currentSlots]
+    .filter(slot => eligibleSet.has(slot.date))
+    .map(slot => [`${slot.date}|${slot.time}`, slot])).values()]
+    .sort((left, right) => left.date.localeCompare(right.date)
+      || (clockFromText(left.time)?.minutes ?? 0) - (clockFromText(right.time)?.minutes ?? 0));
+}
+
+export function hasFreshCoverage(dates, checkedAtByDate, { now = Date.now(), maxAgeHours = 8 } = {}) {
+  const cutoff = now - maxAgeHours * 60 * 60 * 1000;
+  return dates.every(date => {
+    const checkedAt = Date.parse(checkedAtByDate?.[date] ?? '');
+    return Number.isFinite(checkedAt) && checkedAt >= cutoff;
+  });
+}
+
 export function markdownSummary(result) {
   const heading = result.status === 'available'
     ? `Holiday Afternoon Tea is available for ${result.partySize}!`
     : result.status === 'unavailable'
       ? 'No matching Holiday Afternoon Tea reservations were found.'
-      : 'The Holiday Afternoon Tea check could not be completed.';
+      : result.status === 'partial'
+        ? 'A partial Holiday Afternoon Tea batch completed; no matching reservations were found in this batch.'
+        : 'The Holiday Afternoon Tea check could not be completed.';
   const lines = [
     heading,
     '',
     `Checked: ${result.checkedAt}`,
     `Configured range: ${result.configuredRange ?? result.dates.join(', ')}`,
-    `Dates checked this run: ${result.dates.length ? result.dates.join(', ') : 'none currently eligible'}`,
+    `Rolling-window dates: ${result.eligibleDateCount ?? result.dates.length}`,
+    `Batch: ${(result.shardIndex ?? 0) + 1}/${result.shardCount ?? 1}`,
+    `Dates attempted this run: ${result.dates.length ? result.dates.join(', ') : 'none currently eligible'}`,
     `Time window: ${result.timeWindow}`,
   ];
   if (result.slots.length) {
