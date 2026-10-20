@@ -1,0 +1,17 @@
+{
+  "name": "plaza-holiday-tea-monitor",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Read-only availability monitor for The Plaza's Holiday Afternoon Tea",
+  "scripts": {
+    "check": "node monitor.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "playwright": "1.64.1"
+  }
+}
