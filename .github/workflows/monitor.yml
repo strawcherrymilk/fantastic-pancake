@@ -2,7 +2,7 @@ name: Plaza Holiday Tea monitor
 
 on:
   schedule:
-    - cron: "7,37 * * * *"
+    - cron: "7,22,37,52 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -25,7 +25,7 @@ jobs:
       TIME_END: "16:00"
       MAX_DATES_PER_RUN: "60"
       SHARD_COUNT: "7"
-      SHARD_SLOT_MINUTES: "30"
+      SHARD_SLOT_MINUTES: "15"
       COVERAGE_MAX_AGE_HOURS: "8"
       CHECK_DELAY_MS: "10000"
       ALERT_WEBHOOK_URL: ${{ secrets.TEA_ALERT_WEBHOOK_URL }}
