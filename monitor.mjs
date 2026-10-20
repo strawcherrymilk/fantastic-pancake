@@ -10,10 +10,13 @@ import {
   eligibleDates,
   expandDateRange,
   fingerprintSlots,
+  hasFreshCoverage,
   markdownSummary,
+  mergeSlots,
   parseDates,
   parsePartySize,
   parseTime,
+  selectShard,
   slotMatchesRequest,
 } from './lib.mjs';
 
@@ -56,10 +59,18 @@ function configuration() {
   const configuredDates = process.env.DATES?.trim()
     ? parseDates(process.env.DATES, { maxDates })
     : parseDates(expandDateRange(process.env.DATE_START, process.env.DATE_END).join(','), { maxDates });
-  const dates = eligibleDates(configuredDates, {
+  const allEligibleDates = eligibleDates(configuredDates, {
     today: todayInNewYork(),
     releaseDays: integerEnv('RELEASE_DAYS', 60, { min: 1, max: 90 }),
   });
+  const shardCount = integerEnv('SHARD_COUNT', 1, { min: 1, max: 31 });
+  const shardSlotMinutes = integerEnv('SHARD_SLOT_MINUTES', 60, { min: 5, max: 1440 });
+  const automaticShardIndex = Math.floor(Date.now() / (shardSlotMinutes * 60 * 1000)) % shardCount;
+  const requestedShardIndex = process.env.SHARD_INDEX?.trim();
+  const shardIndex = !requestedShardIndex || requestedShardIndex.toLowerCase() === 'auto'
+    ? automaticShardIndex
+    : integerEnv('SHARD_INDEX', automaticShardIndex, { min: 0, max: shardCount - 1 });
+  const dates = selectShard(allEligibleDates, { shardCount, shardIndex });
   const partySize = parsePartySize(process.env.PARTY_SIZE ?? '2');
   const startMinutes = parseTime(process.env.TIME_START ?? '11:00', 'TIME_START');
   const endMinutes = parseTime(process.env.TIME_END ?? '16:00', 'TIME_END');
@@ -67,13 +78,17 @@ function configuration() {
 
   return {
     dates,
+    allEligibleDates,
     configuredDates,
     configuredRange: `${configuredDates.at(0)}–${configuredDates.at(-1)}`,
+    shardCount,
+    shardIndex,
     partySize,
     startMinutes,
     endMinutes,
     timeWindow: `${process.env.TIME_START ?? '11:00'}–${process.env.TIME_END ?? '16:00'} America/New_York`,
     delayMs: integerEnv('CHECK_DELAY_MS', 4000, { min: 2000, max: 60000 }),
+    coverageMaxAgeHours: integerEnv('COVERAGE_MAX_AGE_HOURS', 8, { min: 1, max: 48 }),
     pageTimeoutMs: integerEnv('PAGE_TIMEOUT_MS', 30000, { min: 10000, max: 120000 }),
     resultFile: path.resolve(HERE, process.env.RESULT_FILE ?? 'result.json'),
     stateFile: path.resolve(HERE, process.env.STATE_FILE ?? '.state/last-result.json'),
@@ -261,7 +276,8 @@ async function main() {
   }
 
   let browser;
-  const slots = [];
+  const currentSlots = [];
+  const checkedDates = [];
   const errors = [];
   try {
     try {
@@ -274,7 +290,8 @@ async function main() {
         for (let index = 0; index < config.dates.length; index += 1) {
           const date = config.dates[index];
           try {
-            slots.push(...await checkDate(browser, date, config));
+            currentSlots.push(...await checkDate(browser, date, config));
+            checkedDates.push(date);
           } catch (error) {
             errors.push({ date, message: cleanError(error) });
             console.error(`${date}: ${cleanError(error)}`);
@@ -292,17 +309,38 @@ async function main() {
     await browser?.close().catch(() => {});
   }
 
-  const status = slots.length ? 'available' : errors.length ? 'error' : 'unavailable';
   const previous = await readJson(config.stateFile);
+  const slots = mergeSlots(previous?.slots, currentSlots, checkedDates, config.allEligibleDates);
+  const checkedAt = new Date().toISOString();
+  const eligibleSet = new Set(config.allEligibleDates);
+  const checkedAtByDate = Object.fromEntries(Object.entries(previous?.checkedAtByDate ?? {})
+    .filter(([date]) => eligibleSet.has(date)));
+  for (const date of checkedDates) checkedAtByDate[date] = checkedAt;
+  const coverageComplete = hasFreshCoverage(config.allEligibleDates, checkedAtByDate, {
+    now: Date.parse(checkedAt),
+    maxAgeHours: config.coverageMaxAgeHours,
+  });
+  const status = slots.length
+    ? 'available'
+    : errors.length && checkedDates.length === 0
+      ? 'error'
+      : coverageComplete
+        ? 'unavailable'
+        : 'partial';
   const fingerprint = fingerprintSlots(slots);
   const notify = status === 'available' && (previous?.status !== 'available' || previous?.fingerprint !== fingerprint);
   const result = {
     status,
     notify,
     event: EVENT,
-    checkedAt: new Date().toISOString(),
+    checkedAt,
     dates: config.dates,
+    checkedDates,
+    eligibleDateCount: config.allEligibleDates.length,
     configuredRange: config.configuredRange,
+    shardCount: config.shardCount,
+    shardIndex: config.shardIndex,
+    coverageComplete,
     partySize: config.partySize,
     timeWindow: config.timeWindow,
     slots,
@@ -327,10 +365,16 @@ async function main() {
   await fs.writeFile(path.join(path.dirname(config.resultFile), 'result.md'), `${summary}\n`);
   await setGitHubOutputs(result);
 
-  if (status !== 'error' && notificationSucceeded) {
-    await writeJson(config.stateFile, { status, fingerprint, checkedAt: result.checkedAt });
+  if (notificationSucceeded && (checkedDates.length || !errors.length)) {
+    await writeJson(config.stateFile, {
+      status,
+      fingerprint,
+      checkedAt: result.checkedAt,
+      slots,
+      checkedAtByDate,
+    });
   }
-  if (status === 'error') process.exitCode = 1;
+  if (errors.length) process.exitCode = 1;
 }
 
 await main().catch(error => {
