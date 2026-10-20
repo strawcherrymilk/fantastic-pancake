@@ -62,9 +62,9 @@ dates currently inside the rolling 60-day release window.
 ## GitHub Actions
 
 This directory is a self-contained repository. Its workflow at
-`.github/workflows/monitor.yml` runs every 30 minutes and can also be started
+`.github/workflows/monitor.yml` runs every 15 minutes and can also be started
 manually. Each run checks one of seven rotating date batches, so the complete
-rolling window is covered about every 3.5 hours without sending a large burst
+rolling window is covered about every 1 hour 45 minutes without sending a large burst
 of requests. The cloud runner uses a normal Chromium window inside a virtual
 display because that is the browser mode OpenTable accepted during the local
 live test.
