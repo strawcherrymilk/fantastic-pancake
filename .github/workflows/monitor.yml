@@ -20,6 +20,147 @@ jobs:
     env:
       DATE_START: "2026-11-18"
       DATE_END: "2027-01-12"
+      EXCLUDE_DATES: "2026-11-25,2026-11-26"
+      PARTY_SIZE: "4"
+      TIME_START: "11:00"
+      TIME_END: "16:00"
+      MAX_DATES_PER_RUN: "60"
+      SHARD_COUNT: "7"
+      SHARD_SLOT_MINUTES: "15"
+      COVERAGE_MAX_AGE_HOURS: "8"
+      CHECK_DELAY_MS: "10000"
+      ALERT_WEBHOOK_URL: ${{ secrets.TEA_ALERT_WEBHOOK_URL }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Restore alert state
+        uses: actions/cache/restore@v4
+        with:
+          path: .state
+          key: plaza-tea-state-${{ github.run_id }}
+          restore-keys: plaza-tea-state-
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Install browser and virtual display dependencies
+        run: npx playwright install --with-deps chromium
+
+      - name: Check availability
+        id: monitor
+        continue-on-error: true
+        env:
+          HEADLESS: "false"
+        run: xvfb-run -a node monitor.mjs
+
+      - name: Create, update, or close availability issue
+        if: always() && steps.monitor.outputs.status != '' && steps.monitor.outputs.status != 'error'
+        uses: actions/github-script@v8
+        env:
+          MONITOR_STATUS: ${{ steps.monitor.outputs.status }}
+        with:
+          script: |
+            const fs = require('fs');
+            const result = JSON.parse(fs.readFileSync('result.json', 'utf8'));
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const label = 'tea-availability';
+            const title = '[OpenTable] Holiday Afternoon Tea availability';
+            const body = [
+              `Checked: ${result.checkedAt}`,
+              `Party size: ${result.partySize}`,
+              `Configured range: ${result.configuredRange}`,
+              `Excluded dates: ${result.excludedDates.join(', ')}`,
+              `Rolling-window dates: ${result.eligibleDateCount}`,
+              `Batch: ${result.shardIndex + 1}/${result.shardCount}`,
+              `Dates attempted: ${result.dates.join(', ')}`,
+              `Time window: ${result.timeWindow}`,
+              '',
+              ...result.slots.map(slot => `- [${slot.date} at ${slot.time}](${slot.url})`),
+              '',
+              '_This monitor does not hold or book a table._',
+            ].join('\n');
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner, repo, state: 'open', labels: label, per_page: 100,
+            });
+            const existing = issues.find(issue => !issue.pull_request && issue.title === title);
+            if (process.env.MONITOR_STATUS === 'available') {
+              if (existing) {
+                await github.rest.issues.update({ owner, repo, issue_number: existing.number, body });
+              } else {
+                try {
+                  await github.rest.issues.getLabel({ owner, repo, name: label });
+                } catch (error) {
+                  if (error.status !== 404) throw error;
+                  await github.rest.issues.createLabel({ owner, repo, name: label, color: 'd73a4a' });
+                }
+                await github.rest.issues.create({ owner, repo, title, body, labels: [label] });
+              }
+            } else if (process.env.MONITOR_STATUS === 'unavailable' && existing) {
+              await github.rest.issues.update({
+                owner, repo, issue_number: existing.number, state: 'closed',
+                state_reason: 'completed',
+              });
+            }
+
+      - name: Add run summary
+        if: always() && steps.monitor.outputs.status != ''
+        run: cat result.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload debug information
+        if: always() && steps.monitor.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: plaza-tea-debug-${{ github.run_id }}
+          path: |
+            result.json
+            result.md
+            debug/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Save alert state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .state
+          key: plaza-tea-state-${{ github.run_id }}
+
+      - name: Fail on complete monitor error
+        if: always() && steps.monitor.outcome == 'failure' && steps.monitor.outputs.status != 'partial' && steps.monitor.outputs.status != 'available'
+        run: exit 1
+name: Plaza Holiday Tea monitor
+
+on:
+  schedule:
+    - cron: "7,22,37,52 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: plaza-holiday-tea-monitor
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATE_START: "2026-11-18"
+      DATE_END: "2027-01-12"
       PARTY_SIZE: "4"
       TIME_START: "11:00"
       TIME_END: "16:00"
