@@ -59,7 +59,11 @@ function configuration() {
   const configuredDates = process.env.DATES?.trim()
     ? parseDates(process.env.DATES, { maxDates })
     : parseDates(expandDateRange(process.env.DATE_START, process.env.DATE_END).join(','), { maxDates });
-  const allEligibleDates = eligibleDates(configuredDates, {
+  const excludedDates = process.env.EXCLUDE_DATES?.trim()
+    ? parseDates(process.env.EXCLUDE_DATES, { maxDates })
+    : [];
+  const excludedSet = new Set(excludedDates);
+  const allEligibleDates = eligibleDates(configuredDates.filter(date => !excludedSet.has(date)), {
     today: todayInNewYork(),
     releaseDays: integerEnv('RELEASE_DAYS', 60, { min: 1, max: 90 }),
   });
@@ -80,6 +84,7 @@ function configuration() {
     dates,
     allEligibleDates,
     configuredDates,
+    excludedDates,
     configuredRange: `${configuredDates.at(0)}–${configuredDates.at(-1)}`,
     shardCount,
     shardIndex,
@@ -338,6 +343,7 @@ async function main() {
     checkedDates,
     eligibleDateCount: config.allEligibleDates.length,
     configuredRange: config.configuredRange,
+    excludedDates: config.excludedDates,
     shardCount: config.shardCount,
     shardIndex: config.shardIndex,
     coverageComplete,
