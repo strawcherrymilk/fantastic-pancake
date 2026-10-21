@@ -148,6 +148,7 @@ export function markdownSummary(result) {
     '',
     `Checked: ${result.checkedAt}`,
     `Configured range: ${result.configuredRange ?? result.dates.join(', ')}`,
+    ...(result.excludedDates?.length ? [`Excluded dates: ${result.excludedDates.join(', ')}`] : []),
     `Rolling-window dates: ${result.eligibleDateCount ?? result.dates.length}`,
     `Batch: ${(result.shardIndex ?? 0) + 1}/${result.shardCount ?? 1}`,
     `Dates attempted this run: ${result.dates.length ? result.dates.join(', ') : 'none currently eligible'}`,
