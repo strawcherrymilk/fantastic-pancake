@@ -73,6 +73,7 @@ The committed workflow is configured for four guests, any tea seating from
 11:00 AM through 4:00 PM, and the complete November 18, 2026 through January
 12, 2027 season. Each run automatically skips past dates and dates that are
 more than 60 days away, matching the restaurant's rolling release policy.
+November 25 and November 26, 2026 are explicitly excluded from cloud checks.
 Successful results are merged across batches. An open availability issue is
 closed only after every currently eligible date has a recent successful check;
 a partial or blocked batch never turns a previous alert into "unavailable."
@@ -83,9 +84,11 @@ webhook, add an Actions secret named `TEA_ALERT_WEBHOOK_URL`. If you rely only
 on the issue, watch the repository and enable GitHub issue notifications so
 the new issue reaches you.
 
-GitHub-hosted browser traffic may occasionally be blocked by OpenTable. Those
-runs fail visibly and upload debug artifacts. If that happens consistently,
-use local cron with installed Chrome by setting `BROWSER_CHANNEL=chrome`.
+GitHub-hosted browser traffic may occasionally be blocked by OpenTable. A
+single uncertain date is reported as a warning with debug artifacts; the run
+fails only when the batch cannot be checked at all. If blocking happens
+consistently, use local cron with installed Chrome by setting
+`BROWSER_CHANNEL=chrome`.
 
 ## Important behavior
 
